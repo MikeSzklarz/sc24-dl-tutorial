@@ -4,7 +4,10 @@ import logging
 _format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 
 def slurm_filter(record):
-  return int(os.environ['SLURM_PROCID']) == 0
+  # TODO possibly change this back. Not sure of the implications
+  #return int(os.environ['SLURM_PROCID']) == 0
+  slurm_procid = os.getenv('SLURM_PROCID', '0')
+  return int(slurm_procid) == 0
 
 def config_logger(log_level=logging.INFO):
   logging.basicConfig(format=_format, level=log_level)
