@@ -1,3 +1,14 @@
+## Updated to work outside of Container Image
+Data for tutorial includes about 800gb of downsampled ERA5 datasets. To download the data, run the following command:
+```bash
+bash fetch_nersc_23_data.sh &
+```
+Make sure you have conda installed. Create the conda environment, then activate the environment using the following commands:
+```bash
+conda env create -f environment.yml
+conda activate nersc24
+```
+
 # SC24 Deep Learning at Scale Tutorial
 
 This repository contains the example code material for the SC24 tutorial:
