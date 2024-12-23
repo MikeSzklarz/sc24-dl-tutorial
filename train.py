@@ -164,8 +164,6 @@ def train(params, args, local_rank, world_rank, world_size):
             tr_time += tr_end - tr_start
             dat_time += tr_start - dat_start
             step_count += 1
-            
-            print(f"rank {world_rank}, epoch {epoch}, step {i}, loss {loss.item()}")
 
         torch.cuda.synchronize() # device sync to ensure accurate epoch timings
         end = time.time()
