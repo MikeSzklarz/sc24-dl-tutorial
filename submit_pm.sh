@@ -1,21 +1,28 @@
-#!/bin/bash 
-#SBATCH -C gpu 
-#SBATCH -q shared
-#SBATCH -A ntrain4
-#SBATCH --cpus-per-task 32
-#SBATCH --gpus-per-task 1
-#SBATCH --gpu-bind none
-#SBATCH --time=01:00:00
-#SBATCH --image=nersc/pytorch:24.06.02
-#SBATCH --module=gpu,nccl-plugin
-#SBATCH --reservation=sc24_dl_tutorial_1
-#SBATCH -J vit-era5
-#SBATCH -o %x-%j.out
+#!/bin/bash
 
-DATADIR=/pscratch/sd/s/shas1693/data/sc24_tutorial_data
-LOGDIR=${SCRATCH}/sc24-dl-tutorial/logs
+#SBATCH --job-name=vit-era5_%j                      # Job name
+#SBATCH --output=logs/job_%j.txt                    # Output log
+#SBATCH --ntasks=1                                  # Number of tasks
+#SBATCH --mem=65536                                 # Memory (64 GB)
+#SBATCH --time=30-00:00:00                          # Job time limit
+#SBATCH --partition=waccamaw                        # Partition to use
+#SBATCH --exclusive                                 # Exclusive node allocation
+#SBATCH --exclude=waccamaw02,waccamaw03,waccamaw04  # Exclude specific nodes
+
+
+DATADIR=${PWD}/data
+LOGDIR=${PWD}/logs
 mkdir -p ${LOGDIR}
 args="${@}"
+
+# Load the environment
+# Uncomment below if erroring
+# source /mnt/cidstore1/software/debian12/anaconda3/etc/profile.d/conda.sh 2>> logs/vit-era5_${SLURM_JOB_ID}_error.txt
+# conda activate nersc24 2>> logs/vit-era5_${SLURM_JOB_ID}_error.txt
+
+# No Errors dont need extra file
+source /mnt/cidstore1/software/debian12/anaconda3/etc/profile.d/conda.sh
+conda activate nersc24
 
 export FI_MR_CACHE_MONITOR=userfaultfd
 export HDF5_USE_FILE_LOCKING=FALSE
@@ -30,12 +37,14 @@ fi
 
 export MASTER_ADDR=$(hostname)
 
-# Reversing order of GPUs to match default CPU affinities from Slurm
-export CUDA_VISIBLE_DEVICES=3,2,1,0
+# Having multiple gpus available when only one is avaiable causes issues
+export CUDA_VISIBLE_DEVICES=0
 
+# Debugging mode
 set -x
-srun -u shifter -V ${DATADIR}:/data -V ${LOGDIR}:/logs \
-    bash -c "
+
+# Run the training script directly
+srun -u bash -c "
     source export_DDP_vars.sh
     ${PROFILE_CMD} python train.py ${args}
-    "
+"
