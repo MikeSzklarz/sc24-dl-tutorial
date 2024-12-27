@@ -47,7 +47,7 @@ short: &short_ls
   num_iters: 128
 
 # limit global batch size because of memory issue
-short: &short_ls_dali
+short_dali: &short_ls_dali
   <<: *base
   limit_nsamples: 512
   limit_nsamples_val: 128
