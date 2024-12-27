@@ -295,6 +295,12 @@ We can run this experiment on Perlmutter using DALI with 8 worker threads by run
 sbatch -n 1 -t 20 ./submit_pm.sh --config=short --num_data_workers 8 --data_loader_config=dali
 ```
 
+Can also view the profiling by adding the profiling commands above such as:
+```
+ENABLE_PROFILING=1 PROFILE_OUTPUT=8workers-dali sbatch -n 1 -t 20 ./submit_pm.sh --config=short_dali --num_data_workers=8 --data_loader_config=dali
+```
+Note: Config ```short_dali``` is updated with a smaller global batch size of 8 instead of 16
+
 This is the performance of the training script for the first four epochs on a 40GB A100 card with batch size 16 and DALI:
 ```
 2024-11-08 22:37:59,065 - root - INFO - Starting Training Loop...

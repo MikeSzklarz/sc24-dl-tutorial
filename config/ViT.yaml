@@ -51,7 +51,7 @@ short_dali: &short_ls_dali
   <<: *base
   limit_nsamples: 512
   limit_nsamples_val: 128
-  num_iters: 128
+  num_iters: 256
   global_batch_size: 8
 
 # add optimization flags
