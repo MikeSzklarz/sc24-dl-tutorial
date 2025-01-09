@@ -34,7 +34,7 @@ if [ "${ENABLE_PROFILING:-0}" -eq 1 ]; then
     # Check for memory profiling flag
     if [ "${ENABLE_MEMORY_CAPTURE:-0}" -eq 1 ]; then
         echo "Enabling memory capture (mem, osrt)..."
-        MEM_FLAGS=",mem,osrt"  # Additional flags for memory profiling
+        MEM_FLAGS=",osrt"  # Additional flags for memory profiling
     else
         MEM_FLAGS=""
     fi
