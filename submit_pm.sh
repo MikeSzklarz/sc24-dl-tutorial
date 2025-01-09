@@ -39,7 +39,7 @@ if [ "${ENABLE_PROFILING:-0}" -eq 1 ]; then
         MEM_FLAGS=""
     fi
 
-    NSYS_ARGS="--trace=cuda,cublas,nvtx --kill none -c cudaProfilerApi -f true"
+    NSYS_ARGS="--trace=cuda,cublas,nvtx${MEM_FLAGS} --kill none -c cudaProfilerApi -f true"
     NSYS_OUTPUT=${LOGDIR}/${PROFILE_OUTPUT:-"profile"}
     export PROFILE_CMD="nsys profile $NSYS_ARGS -o $NSYS_OUTPUT"
 fi
