@@ -33,13 +33,13 @@ if [ "${ENABLE_PROFILING:-0}" -eq 1 ]; then
 
     # Check for memory profiling flag
     if [ "${ENABLE_MEMORY_CAPTURE:-0}" -eq 1 ]; then
-        echo "Enabling memory capture (mem, osrt)..."
-        MEM_FLAGS=",osrt"  # Additional flags for memory profiling
+        echo "Enabling memory capture with --cuda-memory-usage..."
+        MEM_FLAGS="--cuda-memory-usage=true"  # Enable GPU memory usage tracking
     else
         MEM_FLAGS=""
     fi
 
-    NSYS_ARGS="--trace=cuda,cublas,nvtx${MEM_FLAGS} --kill none -c cudaProfilerApi -f true"
+    NSYS_ARGS="--trace=cuda,cublas,nvtx --kill none -c cudaProfilerApi -f true ${MEM_FLAGS}"
     NSYS_OUTPUT=${LOGDIR}/${PROFILE_OUTPUT:-"profile"}
     export PROFILE_CMD="nsys profile $NSYS_ARGS -o $NSYS_OUTPUT"
 fi
