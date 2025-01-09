@@ -11,5 +11,6 @@ pynvml==11.4.1
 ruamel.base==1.0.0
 ruamel.yaml==0.18.6
 tensorboard==2.9.0
+torch-tb-profiler==0.4.3
 torch==2.4.1
 torchinfo==1.8.0

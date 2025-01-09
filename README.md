@@ -8,6 +8,7 @@ Make sure you have conda installed. Create the conda environment, then activate 
 conda env create -f environment.yml
 conda activate nersc24
 ```
+If using a local machine with VSCode to view tensorboard output, make sure to select python interpreter to the conda environment. To do this, press `Ctrl+Shift+P` and type `Python: Select Interpreter`. Then select the conda environment. 
 
 # SC24 Deep Learning at Scale Tutorial
 
@@ -169,7 +170,7 @@ We can also add calls to `torch.cuda.profiler.start()` and `torch.cuda.profiler.
 
 To generate a profile using our scripts on Perlmutter, run the following command: 
 ```
-ENABLE_PROFILING=1 PROFILE_OUTPUT=baseline sbatch -n1 -t 20 submit_pm.sh --config=short
+ENABLE_PROFILING=1 PROFILE_OUTPUT=baseline sbatch -n 1 -t 20 submit_pm.sh --config=short
 ```
 This command will run four epochs of the training script, profiling only the last epoch run. It will produce a file `baseline.nsys-rep` that can be opened in the Nsight System's program. The arg `--trace=cuda,nvtx` is optional and is used here to disable OS Runtime tracing for speed. The arg `-c cudaProfilerApi` instructs the profiler to only profile the duration of the runtime between the `torch.cuda.profiler.start()` and `torch.cuda.profiler.stop()` calls.
 

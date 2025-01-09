@@ -30,6 +30,15 @@ export HDF5_USE_FILE_LOCKING=FALSE
 # Profiling
 if [ "${ENABLE_PROFILING:-0}" -eq 1 ]; then
     echo "Enabling profiling..."
+
+    # Check for memory profiling flag
+    if [ "${ENABLE_MEMORY_CAPTURE:-0}" -eq 1 ]; then
+        echo "Enabling memory capture (mem, osrt)..."
+        MEM_FLAGS=",mem,osrt"  # Additional flags for memory profiling
+    else
+        MEM_FLAGS=""
+    fi
+
     NSYS_ARGS="--trace=cuda,cublas,nvtx --kill none -c cudaProfilerApi -f true"
     NSYS_OUTPUT=${LOGDIR}/${PROFILE_OUTPUT:-"profile"}
     export PROFILE_CMD="nsys profile $NSYS_ARGS -o $NSYS_OUTPUT"

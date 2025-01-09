@@ -99,7 +99,7 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_scalar('Loss/valid', val_loss.item()/world_size, 0)
             args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0]/world_size, 0)
 
-    params.num_epochs = params.num_iters//len(train_data_loader)
+    params.num_epochs = params.num_epochs if params.num_epochs is not None else params.num_iters//len(train_data_loader)
     iters = 0
     t1 = time.time()
     for epoch in range(startEpoch, startEpoch + params.num_epochs):
@@ -164,6 +164,15 @@ def train(params, args, local_rank, world_rank, world_size):
             tr_time += tr_end - tr_start
             dat_time += tr_start - dat_start
             step_count += 1
+            
+            # #TODO Remove this
+            # logging.info(f'Step {i}, loss={loss.item()}')
+            # logging.info(f'GPU mem = {torch.cuda.memory_allocated()/1e9} GB')
+            # logging.info(f'GPU cache mem = {torch.cuda.memory_reserved()/1e9} GB')
+            
+            # # Using tensorboard to log memory usage
+             
+            
 
         torch.cuda.synchronize() # device sync to ensure accurate epoch timings
         end = time.time()
@@ -227,6 +236,7 @@ if __name__ == '__main__':
     parser.add_argument("--enable_jit", action='store_true', help='enable JIT compilation')
     parser.add_argument("--local_batch_size", default=None, type=int, help='local batchsize (manually override global_batch_size config setting)')
     parser.add_argument("--num_iters", default=None, type=int, help='number of iters to run')
+    parser.add_argument("--num_epochs", default=None, type=int, help='number of epochs to run')
     parser.add_argument("--num_data_workers", default=None, type=int, help='number of data workers for data loader')
     parser.add_argument("--data_loader_config", default=None, type=str, choices=['pytorch', 'dali'], help="dataloader configuration. choices: 'pytorch', 'dali'")
     parser.add_argument("--bucket_cap_mb", default=25, type=int, help='max message bucket size in mb')
@@ -284,6 +294,11 @@ if __name__ == '__main__':
     else:
         # Compute local batch size based on number of ranks
         params.local_batch_size = params.global_batch_size//world_size
+    
+    # Update number of epochs if specified else its None
+    # If its None, it will be computed based on number of iterations and length of dataloader
+    if args.num_epochs:
+        params.num_epochs = args.num_epochs
 
     # for dali data loader, set the actual number of data shards and id
     params.data_num_shards = world_size
