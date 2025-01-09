@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=vit-era5_%j                      # Job name
-#SBATCH --output=logs/job_%j.txt                    # Output log
+#SBATCH --output=logs/slurm/job_%j.txt                    # Output log
 #SBATCH --ntasks=1                                  # Number of tasks
 #SBATCH --mem=65536                                 # Memory (64 GB)
 #SBATCH --time=30-00:00:00                          # Job time limit
@@ -40,7 +40,7 @@ if [ "${ENABLE_PROFILING:-0}" -eq 1 ]; then
     fi
 
     NSYS_ARGS="--trace=cuda,cublas,nvtx --kill none -c cudaProfilerApi -f true ${MEM_FLAGS}"
-    NSYS_OUTPUT=${LOGDIR}/${PROFILE_OUTPUT:-"profile"}
+    NSYS_OUTPUT=${LOGDIR}/profiles/${PROFILE_OUTPUT:-"profile"}
     export PROFILE_CMD="nsys profile $NSYS_ARGS -o $NSYS_OUTPUT"
 fi
 
