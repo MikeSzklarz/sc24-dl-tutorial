@@ -99,7 +99,11 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_scalar('Loss/valid', val_loss.item()/world_size, 0)
             args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0]/world_size, 0)
 
-    params.num_epochs = params.num_epochs if params.num_epochs is not None else params.num_iters//len(train_data_loader)
+    if args.num_epochs is not None:
+        params.num_epochs = args.num_epochs
+    else:
+        params.num_epochs = params.num_iters//len(train_data_loader)
+        
     iters = 0
     t1 = time.time()
     for epoch in range(startEpoch, startEpoch + params.num_epochs):
@@ -294,11 +298,6 @@ if __name__ == '__main__':
     else:
         # Compute local batch size based on number of ranks
         params.local_batch_size = params.global_batch_size//world_size
-    
-    # Update number of epochs if specified else its None
-    # If its None, it will be computed based on number of iterations and length of dataloader
-    if args.num_epochs:
-        params.num_epochs = args.num_epochs
 
     # for dali data loader, set the actual number of data shards and id
     params.data_num_shards = world_size
