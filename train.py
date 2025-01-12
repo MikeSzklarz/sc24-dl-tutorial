@@ -169,15 +169,6 @@ def train(params, args, local_rank, world_rank, world_size):
             dat_time += tr_start - dat_start
             step_count += 1
             
-            # #TODO Remove this
-            # logging.info(f'Step {i}, loss={loss.item()}')
-            # logging.info(f'GPU mem = {torch.cuda.memory_allocated()/1e9} GB')
-            # logging.info(f'GPU cache mem = {torch.cuda.memory_reserved()/1e9} GB')
-            
-            # # Using tensorboard to log memory usage
-             
-            
-
         torch.cuda.synchronize() # device sync to ensure accurate epoch timings
         end = time.time()
 
@@ -185,7 +176,7 @@ def train(params, args, local_rank, world_rank, world_size):
             iters_per_sec = step_count / (end - start)
             samples_per_sec = params["global_batch_size"] * iters_per_sec
             logging.info('Time taken for epoch %i is %f sec, avg %f samples/sec',
-                         epoch + 1, end - start, samples_per_sec)
+                        epoch + 1, end - start, samples_per_sec)
             logging.info('  Avg train loss=%f'%np.mean(tr_loss))
             args.tboard_writer.add_scalar('Loss/train', np.mean(tr_loss), iters)
             args.tboard_writer.add_scalar('Learning Rate', optimizer.param_groups[0]['lr'], iters)
@@ -247,7 +238,7 @@ if __name__ == '__main__':
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
     args = parser.parse_args()
- 
+    
     run_num = args.run_num
 
     params = YParams(os.path.abspath(args.yaml_config), args.config)
