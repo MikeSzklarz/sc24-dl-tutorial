@@ -237,11 +237,15 @@ if __name__ == '__main__':
     parser.add_argument("--bucket_cap_mb", default=25, type=int, help='max message bucket size in mb')
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
+    parser.add_argument("--high_tf32_precision", action='store_true', help='enable high precision TF32')
     args = parser.parse_args()
     
     run_num = args.run_num
 
     params = YParams(os.path.abspath(args.yaml_config), args.config)
+    
+    if args.high_tf32_precision:
+        torch.set_float32_matmul_precision('high')
 
     # Update config with modified args
     # set up amp
