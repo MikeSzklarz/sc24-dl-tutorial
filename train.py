@@ -146,7 +146,14 @@ def train(params, args, local_rank, world_rank, world_size):
             optimizer.zero_grad()
 
             torch.cuda.nvtx.range_push(f"forward")
+            
+            if args.clear_cache:
+                torch.cuda.empty_cache()
+            
             try:
+                if args.end_early:
+                    raise Exception("Ending early for OOM issue")
+                
                 # Error here with batch size 16
                 with autocast(device_type='cuda', enabled=params.amp_enabled, dtype=params.amp_dtype):
                     gen = model(inp)
@@ -265,6 +272,7 @@ if __name__ == '__main__':
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
     parser.add_argument("--clear_cache", action='store_true', default=False, help='clear cache before forward pass')
+    parser.add_argument("--end_early", action='store_true', default=False, help='end training early for oom issue')
     args = parser.parse_args()
     
     run_num = args.run_num
