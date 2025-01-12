@@ -103,9 +103,16 @@ def train(params, args, local_rank, world_rank, world_size):
         params.num_epochs = args.num_epochs
     else:
         params.num_epochs = params.num_iters//len(train_data_loader)
-        
+    
     iters = 0
     t1 = time.time()
+    
+    # Start recording memory snapshot history, initialized with a buffer
+    # capacity of 100,000 memory events, via the `max_entries` field.
+    torch.cuda.memory._record_memory_history(
+        max_entries=100000
+    )
+    
     for epoch in range(startEpoch, startEpoch + params.num_epochs):
         torch.cuda.synchronize() # device sync to ensure accurate epoch timings
         if params.distributed and (train_sampler is not None):
@@ -139,10 +146,20 @@ def train(params, args, local_rank, world_rank, world_size):
             optimizer.zero_grad()
 
             torch.cuda.nvtx.range_push(f"forward")
-            with autocast(device_type='cuda', enabled=params.amp_enabled, dtype=params.amp_dtype):
-                gen = model(inp)
-                loss = loss_func(gen, tar)
-            torch.cuda.nvtx.range_pop() #forward
+            try:
+                # Error here with batch size 16
+                with autocast(device_type='cuda', enabled=params.amp_enabled, dtype=params.amp_dtype):
+                    gen = model(inp)
+                    loss = loss_func(gen, tar)
+                torch.cuda.nvtx.range_pop() #forward
+            except Exception as e:
+                logging.error(f"Error in forward pass: {e}")
+                
+                # Saving memory snapshot after error
+                file_prefix = f"{params.num_data_workers}workers_{params.data_loader_config}_gbs{params.local_batch_size}"
+                torch.cuda.memory._dump_snapshot(f"logs/{file_prefix}.pickle")
+                logging.info(f"Memory snapshot saved to logs/{file_prefix}.pickle")
+                torch.cuda.memory._record_memory_history(enabled=None)
 
             if params.amp_dtype == torch.float16: 
                 scaler.scale(loss).backward()
@@ -217,6 +234,16 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], iters)
             args.tboard_writer.flush()
 
+    try:
+        file_prefix = f"{params.num_data_workers}workers_{params.data_loader_config}_gbs{params.local_batch_size}"
+        torch.cuda.memory._dump_snapshot(f"logs/{file_prefix}.pickle")
+        logging.info(f"Memory snapshot saved to logs/{file_prefix}.pickle")
+    except Exception as e:
+        logging.error(f"Failed to capture memory snapshot {e}")
+
+    # Stop recording memory snapshot history.
+    torch.cuda.memory._record_memory_history(enabled=None)
+    
     t2 = time.time()
     tottime = t2 - t1
 
@@ -237,6 +264,7 @@ if __name__ == '__main__':
     parser.add_argument("--bucket_cap_mb", default=25, type=int, help='max message bucket size in mb')
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
+    parser.add_argument("--clear_cache", action='store_true', default=False, help='clear cache before forward pass')
     args = parser.parse_args()
     
     run_num = args.run_num
