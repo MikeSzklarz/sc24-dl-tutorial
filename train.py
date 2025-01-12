@@ -12,6 +12,10 @@ import torch.multiprocessing
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel
 
+# Only for testing purposes. Wasnt expecting much for this but hardware limitations in
+# compute capabilites does not allow for further exploration.
+from torchao.float8 import convert_to_float8_training
+
 import logging
 from utils import logging_utils
 logging_utils.config_logger()
@@ -36,6 +40,9 @@ def train(params, args, local_rank, world_rank, world_size):
 
     # create model
     model = vit.ViT(params).to(device)
+
+    if args.amp_mode == 'fp8':
+        convert_to_float8_training(model)
 
     if params.enable_jit:
         model = torch.compile(model)
@@ -226,7 +233,7 @@ if __name__ == '__main__':
     parser.add_argument("--run_num", default='00', type=str, help='tag for indexing the current experiment')
     parser.add_argument("--yaml_config", default='./config/ViT.yaml', type=str, help='path to yaml file containing training configs')
     parser.add_argument("--config", default='base', type=str, help='name of desired config in yaml file')
-    parser.add_argument("--amp_mode", default='none', type=str, choices=['none', 'fp16', 'bf16'], help='select automatic mixed precision mode')  
+    parser.add_argument("--amp_mode", default='none', type=str, choices=['none', 'fp16', 'bf16', 'fp8'], help='select automatic mixed precision mode')  
     parser.add_argument("--enable_fused", action='store_true', help='enable fused Adam optimizer')
     parser.add_argument("--enable_jit", action='store_true', help='enable JIT compilation')
     parser.add_argument("--local_batch_size", default=None, type=int, help='local batchsize (manually override global_batch_size config setting)')
@@ -238,7 +245,7 @@ if __name__ == '__main__':
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
     args = parser.parse_args()
-    
+
     run_num = args.run_num
 
     params = YParams(os.path.abspath(args.yaml_config), args.config)
@@ -251,7 +258,9 @@ if __name__ == '__main__':
     if params.amp_mode == "fp16":
         amp_dtype = torch.float16
     elif params.amp_mode == "bf16":
-        amp_dtype = torch.bfloat16    
+        amp_dtype = torch.bfloat16
+    elif params.amp_mode == "fp8":
+        amp_dtype = torch.float8_e4m3fn
     params.update({"amp_enabled": amp_dtype is not torch.float32,
                     "amp_dtype" : amp_dtype, 
                     "enable_fused" : args.enable_fused,
