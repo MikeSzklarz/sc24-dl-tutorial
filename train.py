@@ -22,6 +22,8 @@ from utils.metrics import weighted_rmse
 from utils.plots import generate_images
 from networks import vit
 
+from datetime import timedelta
+
 def train(params, args, local_rank, world_rank, world_size):
     # set device and benchmark mode
     torch.backends.cudnn.benchmark = True
@@ -282,7 +284,8 @@ if __name__ == '__main__':
     local_rank = 0
     if params.distributed:
         torch.distributed.init_process_group(backend='nccl',
-                                            init_method='env://')
+                                            init_method='env://',
+                                            timeout=timedelta(minutes=5))
         world_rank = torch.distributed.get_rank()
         local_rank = int(os.environ['LOCAL_RANK'])
 
