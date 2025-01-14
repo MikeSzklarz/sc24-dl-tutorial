@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --job-name=vit-era5_%j                      # Job name
-#SBATCH --output=logs/slurm/job_%j.txt                    # Output log
+#SBATCH --output=logs/slurm/job_%j.txt              # Output log
 #SBATCH --ntasks=1                                  # Number of tasks
 #SBATCH --mem=65536                                 # Memory (64 GB)
 #SBATCH --time=30-00:00:00                          # Job time limit

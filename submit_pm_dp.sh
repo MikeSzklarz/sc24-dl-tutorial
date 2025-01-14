@@ -2,7 +2,7 @@
 
 #SBATCH --job-name=vit-era5_mn_%j                   # Job name
 #SBATCH --output=logs/slurm/job_%j.txt              # Output log
-#SBATCH --nodes=2                                   # Number of nodes
+#SBATCH --nodes=1                                   # Number of nodes
 #SBATCH --ntasks-per-node=1                         # Number of tasks to invoke on each node
 #SBATCH --mem=65536                                 # Memory (64 GB)
 #SBATCH --time=30-00:00:00                          # Job time limit
