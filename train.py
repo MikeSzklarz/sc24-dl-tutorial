@@ -306,42 +306,6 @@ if __name__ == '__main__':
     world_rank = 0
     local_rank = 0
     if params.distributed:
-        # Conditional debugging
-        if args.debug_distributed:
-            # Connection test
-            master_addr = os.environ['MASTER_ADDR']
-            master_port = int(os.environ['MASTER_PORT'])
-            conn_success = False
-            try:
-                with socket.create_connection((master_addr, master_port), timeout=5) as conn:
-                    logging.info(f"Successfully connected to MASTER_ADDR={master_addr}, MASTER_PORT={master_port}")
-                    conn_success = True
-            except Exception as conn_err:
-                logging.error(f"Connection to MASTER_ADDR={master_addr}, MASTER_PORT={master_port} failed: {conn_err}")
-            
-            # Log all relevant environment variables
-            logging.info("Environment variables for distributed setup (AFTER SOCKET TEST):")
-
-            if not conn_success:
-                logging.info("Setting MASTER_ADDR to ip and MASTER_PORT to 29500 for testing")
-                master_addr = os.environ['MASTER_ADDR_FALLBACK']
-                master_port = int(os.environ['MASTER_PORT'])
-                
-                logging.info("New MASTER_ADDR and MASTER_PORT for testing:")
-                logging.info(f"MASTER_ADDR={master_addr}")
-                logging.info(f"MASTER_PORT={master_port}")
-                
-                try:
-                    with socket.create_connection((master_addr, master_port), timeout=args.ddp_timeout) as conn:
-                        logging.info(f"Successfully connected to MASTER_ADDR={master_addr}, MASTER_PORT={master_port}")
-                        conn_success = True
-                except Exception as conn_err:
-                    logging.error(f"Connection to MASTER_ADDR={master_addr}, MASTER_PORT={master_port} failed: {conn_err}")
-                
-
-            for var in ["MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "LOCAL_RANK", "TORCH_DISTRIBUTED_DEBUG", "NCCL_DEBUG"]:
-                logging.info(f"{var} = {os.environ.get(var, 'Not Set')}")
-    
         try:
             logging.info("Attempting to initialize distributed process group")
             torch.distributed.init_process_group(backend='nccl', init_method='env://', timeout=timedelta(minutes=5))
