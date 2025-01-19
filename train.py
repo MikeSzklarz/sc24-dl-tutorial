@@ -255,6 +255,15 @@ if __name__ == '__main__':
         os.environ['NCCL_DEBUG'] = 'INFO'
         os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'INFO'
         os.environ['NCCL_DEBUG_SUBSYS'] = 'ALL'
+        
+        nccl_dir = os.path.join(os.getcwd(), 'logs', 'nccl') # setting dir to cwd/logs/nccl
+        os.makedirs(nccl_dir, exist_ok=True) # create nccl logs dir if it doesnt exist
+
+        # set NCCL logging to file
+        nccl_file = os.path.join(nccl_dir, 'nccl.log')
+        os.environ['NCCL_LOG_FILE'] = nccl_file
+        logging.info(f"NCCL logs will be saved to {nccl_file}")
+        
         logging.info("Debugging enabled for NCCL and Pytorch Distributed training")
         
         logging.info("Environment Variables Set:")
@@ -307,9 +316,9 @@ if __name__ == '__main__':
                 logging.error(f"Connection to MASTER_ADDR={master_addr}, MASTER_PORT={master_port} failed: {conn_err}")
             
             # Log all relevant environment variables
-            logging.info("Environment variables for distributed setup:")
+            logging.info("Environment variables for distributed setup (AFTER SOCKET TEST):")
             for var in ["MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "LOCAL_RANK", "TORCH_DISTRIBUTED_DEBUG", "NCCL_DEBUG"]:
-                logging.info(f"[DEBUG] {var} = {os.environ.get(var, 'Not Set')}")
+                logging.info(f"{var} = {os.environ.get(var, 'Not Set')}")
     
         try:
             logging.info("Attempting to initialize distributed process group")
