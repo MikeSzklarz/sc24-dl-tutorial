@@ -23,6 +23,7 @@ from utils.plots import generate_images
 from networks import vit
 
 from datetime import timedelta
+import socket
 
 def train(params, args, local_rank, world_rank, world_size):
     # set device and benchmark mode
@@ -240,6 +241,7 @@ if __name__ == '__main__':
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
     parser.add_argument("--high_tf32_precision", action='store_true', help='enable high precision TF32')
+    parser.add_argument("--debug_distributed", action='store_true', help='enable debugging for NCCL and Pytorch Distributed training')
     args = parser.parse_args()
     
     run_num = args.run_num
@@ -248,6 +250,16 @@ if __name__ == '__main__':
     
     if args.high_tf32_precision:
         torch.set_float32_matmul_precision('high')
+        
+    if args.debug_distributed:
+        os.environ['NCCL_DEBUG'] = 'INFO'
+        os.environ['TORCH_DISTRIBUTED_DEBUG'] = 'INFO'
+        os.environ['NCCL_DEBUG_SUBSYS'] = 'ALL'
+        logging.info("Debugging enabled for NCCL and Pytorch Distributed training")
+        
+        logging.info("Environment Variables Set:")
+        for var in ["MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "LOCAL_RANK", "TORCH_DISTRIBUTED_DEBUG", "NCCL_DEBUG"]:
+            logging.info(f"{var}: {os.environ.get(var, 'Not Set')}")
 
     # Update config with modified args
     # set up amp
@@ -283,9 +295,33 @@ if __name__ == '__main__':
     world_rank = 0
     local_rank = 0
     if params.distributed:
-        torch.distributed.init_process_group(backend='nccl',
-                                            init_method='env://',
-                                            timeout=timedelta(minutes=5))
+        # Conditional debugging
+        if args.debug_distributed:
+            # Connection test
+            master_addr = os.environ['MASTER_ADDR']
+            master_port = int(os.environ['MASTER_PORT'])
+            try:
+                with socket.create_connection((master_addr, master_port), timeout=5) as conn:
+                    logging.info(f"Successfully connected to MASTER_ADDR={master_addr}, MASTER_PORT={master_port}")
+            except Exception as conn_err:
+                logging.error(f"Connection to MASTER_ADDR={master_addr}, MASTER_PORT={master_port} failed: {conn_err}")
+            
+            # Log all relevant environment variables
+            logging.info("Environment variables for distributed setup:")
+            for var in ["MASTER_ADDR", "MASTER_PORT", "WORLD_SIZE", "LOCAL_RANK", "TORCH_DISTRIBUTED_DEBUG", "NCCL_DEBUG"]:
+                logging.info(f"[DEBUG] {var} = {os.environ.get(var, 'Not Set')}")
+    
+        try:
+            logging.info("Attempting to initialize distributed process group")
+            torch.distributed.init_process_group(backend='nccl', init_method='env://', timeout=timedelta(minutes=5))
+            logging.info("Distributed process group initialized")
+
+
+        except Exception as e:
+            logging.error(f"Distributed initialization failed: {e}")
+            sys.exit(1)
+
+        # Get world rank and local rank
         world_rank = torch.distributed.get_rank()
         local_rank = int(os.environ['LOCAL_RANK'])
 
