@@ -45,6 +45,8 @@ if [ "${ENABLE_PROFILING:-0}" -eq 1 ]; then
 fi
 
 export MASTER_ADDR=$(hostname)
+# for testing ip instead of hostname
+export MASTER_ADDR_FALLBACK=$(hostname -I | awk '{print $1}')
 
 # Having multiple gpus available when only one is avaiable causes issues
 export CUDA_VISIBLE_DEVICES=0

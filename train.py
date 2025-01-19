@@ -322,11 +322,8 @@ if __name__ == '__main__':
             logging.info("Environment variables for distributed setup (AFTER SOCKET TEST):")
 
             if not conn_success:
-                logging.info("Setting MASTER_ADDR to localhost and MASTER_PORT to 29500 for testing")
-                os.environ['MASTER_ADDR'] = 'localhost'
-                os.environ['MASTER_PORT'] = '29500'
-                
-                master_addr = os.environ['MASTER_ADDR']
+                logging.info("Setting MASTER_ADDR to ip and MASTER_PORT to 29500 for testing")
+                master_addr = os.environ['MASTER_ADDR_FALLBACK']
                 master_port = int(os.environ['MASTER_PORT'])
                 
                 logging.info("New MASTER_ADDR and MASTER_PORT for testing:")
