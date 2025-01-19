@@ -242,6 +242,7 @@ if __name__ == '__main__':
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
     parser.add_argument("--high_tf32_precision", action='store_true', help='enable high precision TF32')
     parser.add_argument("--debug_distributed", action='store_true', help='enable debugging for NCCL and Pytorch Distributed training')
+    parser.add_argument("--ddp_timeout", default=10, type=int, help='timeout for ddp initialization in minutes')
     args = parser.parse_args()
     
     run_num = args.run_num
@@ -331,7 +332,7 @@ if __name__ == '__main__':
                 logging.info(f"MASTER_PORT={master_port}")
                 
                 try:
-                    with socket.create_connection((master_addr, master_port), timeout=5) as conn:
+                    with socket.create_connection((master_addr, master_port), timeout=args.ddp_timeout) as conn:
                         logging.info(f"Successfully connected to MASTER_ADDR={master_addr}, MASTER_PORT={master_port}")
                         conn_success = True
                 except Exception as conn_err:
