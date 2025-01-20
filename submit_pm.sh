@@ -52,8 +52,17 @@ export CUDA_VISIBLE_DEVICES=0
 # Debugging mode
 set -x
 
+echo "--- [ Before Launch: NVIDIA Stats ] ---"
+eval "nvidia-smi"
+eval "numastat -m -z"
+echo "Starting training..."
+
 # Run the training script directly
 srun -u bash -c "
     source export_DDP_vars.sh
     ${PROFILE_CMD} python train.py ${args}
 "
+
+echp "--- [ After Launch: NVIDIA Stats ] ---"
+eval "nvidia-smi"
+eval "numastat -m -z"

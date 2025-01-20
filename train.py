@@ -171,6 +171,8 @@ def train(params, args, local_rank, world_rank, world_size):
             dat_time += tr_start - dat_start
             step_count += 1
             
+            logging.info(f"   step={step_count}")
+            
         torch.cuda.synchronize() # device sync to ensure accurate epoch timings
         end = time.time()
 
@@ -240,6 +242,8 @@ if __name__ == '__main__':
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
     parser.add_argument("--high_tf32_precision", action='store_true', help='enable high precision TF32')
+    parser.add_argument("--mem_debug", action='store_true', help='enable memory debugging')
+    parser.add_argument("--warn_tensor_cycles", action='store_true', help='enable tensor cycle warnings')
     args = parser.parse_args()
     
     run_num = args.run_num
@@ -248,6 +252,11 @@ if __name__ == '__main__':
     
     if args.high_tf32_precision:
         torch.set_float32_matmul_precision('high')
+        
+    if args.warn_tensor_cycles:
+        from torch.utils.viz._cycles import warn_tensor_cycles
+        logging.info("Warn tensor cycles enabled")
+        warn_tensor_cycles()
 
     # Update config with modified args
     # set up amp
