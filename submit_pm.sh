@@ -63,6 +63,6 @@ srun -u bash -c "
     ${PROFILE_CMD} python train.py ${args}
 "
 
-echp "--- [ After Launch: NVIDIA Stats ] ---"
+echo "--- [ After Launch: NVIDIA Stats ] ---"
 eval "nvidia-smi"
 eval "numastat -m -z"
