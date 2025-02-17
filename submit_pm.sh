@@ -7,8 +7,6 @@
 #SBATCH --time=30-00:00:00                          # Job time limit
 #SBATCH --partition=waccamaw                        # Partition to use
 #SBATCH --exclusive                                 # Exclusive node allocation
-#SBATCH --exclude=waccamaw02,waccamaw03,waccamaw04  # Exclude specific nodes
-
 
 DATADIR=${PWD}/data
 LOGDIR=${PWD}/logs

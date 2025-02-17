@@ -107,6 +107,10 @@ def train(params, args, local_rank, world_rank, world_size):
     else:
         params.num_epochs = params.num_iters//len(train_data_loader)
         
+    logging.info(f"Iterations: {params.num_iters}")
+    logging.info(f"Data Loader Length: {len(train_data_loader)}")
+    logging.info(f"Epochs: {params.num_epochs}")
+    
     iters = 0
     t1 = time.time()
     for epoch in range(startEpoch, startEpoch + params.num_epochs):
@@ -171,6 +175,8 @@ def train(params, args, local_rank, world_rank, world_size):
             tr_time += tr_end - tr_start
             dat_time += tr_start - dat_start
             step_count += 1
+            
+            logging.info(f'Step {i} completed')
             
         torch.cuda.synchronize() # device sync to ensure accurate epoch timings
         end = time.time()
