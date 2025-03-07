@@ -71,11 +71,25 @@ opt: &opt
   data_loader_config: 'dali'
   num_data_workers: 8
   amp_mode: fp16
-  num_iters: 1024
   enable_jit: true
   enable_fused: true
 
 # ----- Data parallel scaling configs
+bs2_opt:
+  <<: *opt
+  global_batch_size: 2
+  lr: 1.77e-4
+
+bs4_opt:
+  <<: *opt
+  global_batch_size: 4
+  lr: 2.5e-4
+
+bs8_opt:
+  <<: *opt
+  global_batch_size: 8
+  lr: 3.54e-4
+
 bs16_opt:
   <<: *opt
   global_batch_size: 16
@@ -128,6 +142,21 @@ mp: &mp
   amp_mode: fp16
   enable_jit: true
   enable_fused: true
+
+mp_bs2:
+  <<: *mp
+  global_batch_size: 2
+  lr: 1.77e-4
+
+mp_bs4:
+  <<: *mp
+  global_batch_size: 4
+  lr: 2.5e-4
+
+mp_bs8:
+  <<: *mp
+  global_batch_size: 8
+  lr: 3.54e-4
 
 mp_bs16:
   <<: *mp
