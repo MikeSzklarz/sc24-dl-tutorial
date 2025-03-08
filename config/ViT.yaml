@@ -66,8 +66,6 @@ short_opt:
 # no samples limits
 opt: &opt
   <<: *base
-  limit_nsamples: 1024
-  limit_nsamples_val: 256
   data_loader_config: 'dali'
   num_data_workers: 8
   amp_mode: fp16
