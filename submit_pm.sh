@@ -8,7 +8,7 @@
 #SBATCH --partition=waccamaw                        # Partition to use
 #SBATCH --exclusive                                 # Exclusive node allocation
 
-DATADIR=${PWD}/data
+DATADIR=${PWD%/*}/nersc_data
 LOGDIR=${PWD}/logs
 mkdir -p ${LOGDIR}
 args="${@}"

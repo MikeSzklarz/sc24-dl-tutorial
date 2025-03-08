@@ -14,7 +14,7 @@
 # Can exclude nodes with "#SBATCH --exclude=waccamaw03, waccamaw04"
 # For current testing not needed.
 
-DATADIR=${PWD}/data
+DATADIR=${PWD%/*}/nersc_data
 LOGDIR=${PWD}/logs
 mkdir -p ${LOGDIR}
 args="${@}"
