@@ -532,6 +532,8 @@ class MetricsLogger:
         # Reset timers for next iteration
         self.reset_timers()
         
+        logging.info(f"Metrics Logged Iteration: {iteration}")
+        
         return img_metrics if self.is_main_process else None
     
     def save_node_prediction_data(self, fields, iteration, epoch):
