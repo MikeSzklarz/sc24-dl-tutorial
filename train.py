@@ -1,9 +1,9 @@
 import sys
 import os
 import time
+from matplotlib import pyplot as plt
 import numpy as np
 import argparse
-import signal
 
 import torch
 import torch.nn as nn
@@ -23,15 +23,8 @@ from utils.metrics import weighted_rmse
 from utils.plots import generate_images
 from networks import vit
 
-# Import the enhanced logging system
-from logging_system import (
-    DistributedMetricsLogger,
-    SystemMetricsMonitor,
-    TrainingMetricsHook,
-    ModelMetricsHook,
-    patch_torch_distributed,
-    MetricsVisualizer
-)
+# Import the metrics logger
+from metrics_logger import MetricsLogger
 
 def train(params, args, local_rank, world_rank, world_size):
     # set device and benchmark mode
@@ -39,386 +32,281 @@ def train(params, args, local_rank, world_rank, world_size):
     torch.cuda.set_device(local_rank)
     device = torch.device('cuda:%d'%local_rank)
 
-    # Initialize variables to track resources that need cleanup
-    logger = None
-    system_monitor = None
-    restore_torch_distributed_func = None
-    model_metrics = None
-    
-    # Define signal handler for graceful shutdown
-    def signal_handler(sig, frame):
-        logging.info(f"Rank {world_rank}: Signal {sig} received, shutting down gracefully...")
-        
-        # Ensure summary report gets generated
-        if logger is not None:
-            try:
-                logging.info(f"Rank {world_rank}: Generating summary report during shutdown...")
-                logger.generate_summary_report()
-                logger.flush_all()
-                logger.close()
-            except Exception as e:
-                logging.error(f"Error during emergency shutdown cleanup: {str(e)}")
-        
-        # Clean up other resources
-        try:
-            if system_monitor is not None:
-                system_monitor.stop()
-            
-            if model_metrics is not None:
-                model_metrics.remove_hooks()
-            
-            if restore_torch_distributed_func is not None:
-                restore_torch_distributed_func()
-        except Exception as e:
-            logging.error(f"Error during resource cleanup: {str(e)}")
-            
-        # Force exit with code indicating interruption
-        sys.exit(1)
-    
-    # Register signal handlers
-    signal.signal(signal.SIGINT, signal_handler)   # Keyboard interrupt (Ctrl+C)
-    signal.signal(signal.SIGTERM, signal_handler)  # Termination signal from cluster
-    
-    try:
-        # Initialize the logging system
-        logging.info('rank %d, initialize logging system'%world_rank)
-        
-        # Create logging configuration
-        logging_config = {
-            "system_metrics_interval": args.metrics_interval,
-            "buffer_size": 100,
-            "flush_interval": 5,
-            "log_frequency": args.log_frequency,
-            "detailed_metrics_frequency": args.detailed_frequency,
-            "log_gradients": args.log_gradients,
-            "log_parameters": args.log_parameters,
-            "log_system_metrics": args.log_system,
-            "log_communication": args.log_communication
-        }
-        
-        # Initialize metrics logger
-        logger = DistributedMetricsLogger(
-            log_dir=os.path.join(params.experiment_dir, "logs"),
-            world_rank=world_rank,
-            world_size=world_size,
-            config=logging_config
-        )
-        
-        # Start system metrics monitoring if enabled
-        if args.log_system:
-            system_monitor = SystemMetricsMonitor(logger, interval=args.metrics_interval)
-            system_monitor.start()
-        
-        # Initialize training metrics hook
-        training_metrics = TrainingMetricsHook(logger, params, log_frequency=args.log_frequency)
-        
-        # Patch torch.distributed functions if needed
-        if args.log_communication and params.distributed:
-            restore_torch_distributed_func = patch_torch_distributed(logger)
-        
-        # get data loader
-        logging.info('rank %d, begin data loader init'%world_rank)
-        train_data_loader, train_dataset, train_sampler = get_data_loader_distributed(params, params.train_data_path, params.distributed, train=True)
-        val_data_loader, valid_dataset = get_data_loader_distributed(params, params.valid_data_path, params.distributed, train=False)
-        logging.info('rank %d, data loader initialized'%(world_rank))
+    # get data loader
+    logging.info('rank %d, begin data loader init'%world_rank)
+    train_data_loader, train_dataset, train_sampler = get_data_loader_distributed(params, params.train_data_path, params.distributed, train=True)
+    val_data_loader, valid_dataset = get_data_loader_distributed(params, params.valid_data_path, params.distributed, train=False)
+    logging.info('rank %d, data loader initialized'%(world_rank))
 
-        # create model
-        model = vit.ViT(params).to(device)
+    # create model
+    model = vit.ViT(params).to(device)
 
-        if params.enable_jit:
-            model = torch.compile(model)
-            
-        if params.amp_dtype == torch.float16: 
-            scaler = GradScaler('cuda')
+    if params.enable_jit:
+        model = torch.compile(model)
+    
+    if params.amp_dtype == torch.float16: 
+        scaler = GradScaler('cuda')
+    if params.distributed and not args.noddp:
+        if args.disable_broadcast_buffers: 
+            model = DistributedDataParallel(model, device_ids=[local_rank],
+                                            bucket_cap_mb=args.bucket_cap_mb,
+                                            broadcast_buffers=False,
+                                            gradient_as_bucket_view=True)
+        else:
+            model = DistributedDataParallel(model, device_ids=[local_rank],
+                                            bucket_cap_mb=args.bucket_cap_mb)
+
+    if params.enable_fused:
+        optimizer = optim.Adam(model.parameters(), lr = params.lr, fused=True, betas=(0.9, 0.95))
+    else:
+        optimizer = optim.Adam(model.parameters(), lr = params.lr,  betas=(0.9, 0.95))
+
+    if world_rank == 0:
+        logging.info(model)
+
+    # Initialize the metrics logger
+    metrics_logger = MetricsLogger(
+        log_dir=params.experiment_dir,
+        metrics_log_freq=args.metrics_log_freq,
+        world_size=world_size,
+        world_rank=world_rank
+    )
         
-        if params.distributed and not args.noddp:
-            if args.disable_broadcast_buffers: 
-                model = DistributedDataParallel(model, device_ids=[local_rank],
-                                                bucket_cap_mb=args.bucket_cap_mb,
-                                                broadcast_buffers=False,
-                                                gradient_as_bucket_view=True)
+    iters = 0
+    startEpoch = 0
+
+    if params.lr_schedule == 'cosine':
+        if params.warmup > 0:
+            lr_scale = lambda x: min((x+1)/params.warmup, 0.5*(1 + np.cos(np.pi*x/params.num_iters)))
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_scale)
+        else:
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params.num_iters)
+    else:
+        scheduler = None
+
+    # select loss function
+    if params.enable_jit:
+        loss_func = l2_loss_opt
+    else:
+        loss_func = l2_loss
+
+    if world_rank==0: 
+        logging.info("Starting Training Loop...")
+
+    # Log initial loss on train and validation to tensorboard
+    with torch.no_grad():
+        inp, tar = map(lambda x: x.to(device), next(iter(train_data_loader)))
+        gen = model(inp)
+        tr_loss = loss_func(gen, tar)
+        inp, tar = map(lambda x: x.to(device), next(iter(val_data_loader)))
+        gen = model(inp)
+        val_loss = loss_func(gen, tar)
+        val_rmse = weighted_rmse(gen, tar)
+        if params.distributed:
+            torch.distributed.all_reduce(tr_loss)
+            torch.distributed.all_reduce(val_loss)
+            torch.distributed.all_reduce(val_rmse)
+        if world_rank==0:
+            args.tboard_writer.add_scalar('Loss/train', tr_loss.item()/world_size, 0)
+            args.tboard_writer.add_scalar('Loss/valid', val_loss.item()/world_size, 0)
+            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0]/world_size, 0)
+
+    params.num_epochs = params.num_iters//len(train_data_loader)
+    
+    # logging iters and epochs before training
+    if world_rank==0:
+        logging.info(f"Total Epochs: {params.num_epochs}")
+        logging.info(f"Total Iters: {params.num_iters}")
+        logging.info(f"Total training batches: {len(train_data_loader)}")
+        logging.info(f"Total validation batches: {len(val_data_loader)}")
+        logging.info("---------------------------------------------------")
+        
+    iters = 0
+    t1 = time.time()
+    for epoch in range(startEpoch, startEpoch + params.num_epochs):
+        torch.cuda.synchronize() # device sync to ensure accurate epoch timings
+        if params.distributed and (train_sampler is not None):
+            train_sampler.set_epoch(epoch)
+        start = time.time()
+        tr_loss = []
+        tr_time = 0.
+        dat_time = 0.
+        log_time = 0.
+
+        model.train()
+        step_count = 0
+        for i, data in enumerate(train_data_loader, 0):
+            if world_rank == 0:
+                if (epoch == 3 and i == 0):
+                    torch.cuda.profiler.start()
+                if (epoch == 3 and i == len(train_data_loader) - 1):
+                    torch.cuda.profiler.stop()
+
+            torch.cuda.nvtx.range_push(f"step {i}")
+            iters += 1
+            
+            # Start batch timing
+            metrics_logger.on_batch_start()
+            
+            # Start data loading timing
+            metrics_logger.on_data_load_start()
+            dat_start = time.time()
+            torch.cuda.nvtx.range_push(f"data copy in {i}")
+
+            inp, tar = map(lambda x: x.to(device), data)
+            torch.cuda.nvtx.range_pop() # copy in
+            
+            # End data loading timing
+            metrics_logger.on_data_load_end()
+
+            tr_start = time.time()
+            b_size = inp.size(0)
+            
+            optimizer.zero_grad()
+
+            # Forward pass timing
+            metrics_logger.on_forward_start()
+            torch.cuda.nvtx.range_push(f"forward")
+            with autocast('cuda', enabled=params.amp_enabled, dtype=params.amp_dtype):
+                gen = model(inp)
+                loss = loss_func(gen, tar)
+            torch.cuda.nvtx.range_pop() # forward
+            metrics_logger.on_forward_end()
+
+            # Backward pass timing
+            metrics_logger.on_backward_start()
+            if params.amp_dtype == torch.float16: 
+                scaler.scale(loss).backward()
+                
+                # Optimizer step timing
+                metrics_logger.on_optimizer_start()
+                torch.cuda.nvtx.range_push(f"optimizer")
+                scaler.step(optimizer)
+                torch.cuda.nvtx.range_pop() # optimizer
+                metrics_logger.on_optimizer_end()
+                
+                scaler.update()
             else:
-                model = DistributedDataParallel(model, device_ids=[local_rank],
-                                                bucket_cap_mb=args.bucket_cap_mb)
-        
-        # Initialize model metrics hook if enabled
-        if args.log_gradients or args.log_parameters:
-            model_metrics = ModelMetricsHook(
-                logger, 
-                model, 
-                log_frequency=args.detailed_frequency
-            )
+                loss.backward()
+                
+                # Optimizer step timing
+                metrics_logger.on_optimizer_start()
+                torch.cuda.nvtx.range_push(f"optimizer")
+                optimizer.step()
+                torch.cuda.nvtx.range_pop() # optimizer
+                metrics_logger.on_optimizer_end()
+            metrics_logger.on_backward_end()
 
-        if params.enable_fused:
-            optimizer = optim.Adam(model.parameters(), lr = params.lr, fused=True, betas=(0.9, 0.95))
-        else:
-            optimizer = optim.Adam(model.parameters(), lr = params.lr,  betas=(0.9, 0.95))
-
-        if world_rank == 0:
-            logging.info(model)
-
-        iters = 0
-        startEpoch = 0
-
-        if params.lr_schedule == 'cosine':
-            if params.warmup > 0:
-                lr_scale = lambda x: min((x+1)/params.warmup, 0.5*(1 + np.cos(np.pi*x/params.num_iters)))
-                scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_scale)
-            else:
-                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=params.num_iters)
-        else:
-            scheduler = None
-
-        # select loss function
-        if params.enable_jit:
-            loss_func = l2_loss_opt
-        else:
-            loss_func = l2_loss
-
-        if world_rank==0: 
-            logging.info("Starting Training Loop...")
-
-        # Log initial loss on train and validation to tensorboard
-        with torch.no_grad():
-            inp, tar = map(lambda x: x.to(device), next(iter(train_data_loader)))
-            gen = model(inp)
-            tr_loss = loss_func(gen, tar)
-            inp, tar = map(lambda x: x.to(device), next(iter(val_data_loader)))
-            gen = model(inp)
-            val_loss = loss_func(gen, tar)
-            val_rmse = weighted_rmse(gen, tar)
+            # All-reduce timing for distributed training
             if params.distributed:
-                torch.distributed.all_reduce(tr_loss)
-                torch.distributed.all_reduce(val_loss)
-                torch.distributed.all_reduce(val_rmse)
-            if world_rank==0:
-                args.tboard_writer.add_scalar('Loss/train', tr_loss.item()/world_size, 0)
-                args.tboard_writer.add_scalar('Loss/valid', val_loss.item()/world_size, 0)
-                args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0]/world_size, 0)
+                metrics_logger.on_all_reduce_start()
+                torch.distributed.all_reduce(loss)
+                metrics_logger.on_all_reduce_end()
+                
+            tr_loss.append(loss.item()/world_size)
 
-        params.num_epochs = params.num_iters//len(train_data_loader)
-        iters = 0
-        t1 = time.time()
-        
-        # Start main training loop
-        for epoch in range(startEpoch, startEpoch + params.num_epochs):
-            # Mark start of epoch for logging
-            training_metrics.start_epoch(epoch)
+            torch.cuda.nvtx.range_pop() # step
             
-            torch.cuda.synchronize() # device sync to ensure accurate epoch timings
-            if params.distributed and (train_sampler is not None):
-                train_sampler.set_epoch(epoch)
-            start = time.time()
-            tr_loss = []
-            tr_time = 0.
-            dat_time = 0.
-            log_time = 0.
+            # lr step
+            scheduler.step()
 
-            model.train()
-            step_count = 0
-            for i, data in enumerate(train_data_loader, 0):
-                if world_rank == 0:
-                    if (epoch == 3 and i == 0):
-                        torch.cuda.profiler.start()
-                    if (epoch == 3 and i == len(train_data_loader) - 1):
-                        torch.cuda.profiler.stop()
+            tr_end = time.time()
+            tr_time += tr_end - tr_start
+            dat_time += tr_start - dat_start
+            step_count += 1
+            
+            # Calculate samples/sec for this batch
+            batch_time = tr_end - dat_start
+            samples_per_sec = params.global_batch_size / batch_time
+            
+            # Log metrics
+            metrics = metrics_logger.log_metrics(
+                iteration=iters,
+                epoch=epoch,
+                loss=np.mean(tr_loss),
+                samples_per_sec=samples_per_sec,
+                lr=optimizer.param_groups[0]['lr'],
+                optimizer=optimizer,
+                global_batch_size=params.global_batch_size,
+                local_batch_size=params.local_batch_size,
+                image_fields=[inp, tar, gen] if args.save_predictions else None,
+            )
+            
+            # Log image metrics to TensorBoard if available
+            if metrics and world_rank == 0:
+                args.tboard_writer.add_scalar('Training/SSIM', metrics['ssim'], iters)
+                args.tboard_writer.add_scalar('Training/RMSE', metrics['rmse'], iters)
 
-                # Mark start of iteration for logging
-                training_metrics.start_iteration(iters)
-                
-                torch.cuda.nvtx.range_push(f"step {i}")
-                iters += 1
-                
-                # Update model metrics iteration counter if enabled
-                if args.log_gradients or args.log_parameters:
-                    model_metrics.update_iteration(iters)
-                
-                # Mark start of data loading for logging
-                training_metrics.start_data_loading()
-                dat_start = time.time()
-                torch.cuda.nvtx.range_push(f"data copy in {i}")
+        torch.cuda.synchronize() # device sync to ensure accurate epoch timings
+        end = time.time()
 
-                inp, tar = map(lambda x: x.to(device), data)
-                torch.cuda.nvtx.range_pop() # copy in
-                
-                # Mark end of data loading for logging
-                training_metrics.end_data_loading()
+        if world_rank==0:
+            iters_per_sec = step_count / (end - start)
+            samples_per_sec = params["global_batch_size"] * iters_per_sec
+            logging.info('Time taken for epoch %i is %f sec, avg %f samples/sec',
+                         epoch + 1, end - start, samples_per_sec)
+            logging.info('  Avg train loss=%f'%np.mean(tr_loss))
+            args.tboard_writer.add_scalar('Loss/train', np.mean(tr_loss), iters)
+            args.tboard_writer.add_scalar('Learning Rate', optimizer.param_groups[0]['lr'], iters)
+            args.tboard_writer.add_scalar('Avg iters per sec', iters_per_sec, iters)
+            args.tboard_writer.add_scalar('Avg samples per sec', samples_per_sec, iters)
+            
+            fig = generate_images([inp, tar, gen])
+            args.tboard_writer.add_figure('Visualization, t2m', fig, iters, close=True)
+            plt.close(fig)
 
-                tr_start = time.time()
-                b_size = inp.size(0)
-                
-                optimizer.zero_grad()
+        val_start = time.time()
+        val_loss = torch.zeros(1, device=device)
+        val_rmse = torch.zeros((params.n_out_channels), dtype=torch.float32, device=device)
+        valid_steps = 0
+        model.eval()
 
-                # Mark start of forward pass for logging
-                training_metrics.start_forward()
-                torch.cuda.nvtx.range_push(f"forward")
-                with autocast('cuda', enabled=params.amp_enabled, dtype=params.amp_dtype):
-                    gen = model(inp)
-                    loss = loss_func(gen, tar)
-                torch.cuda.nvtx.range_pop() #forward
-                # Mark end of forward pass for logging
-                training_metrics.end_forward()
-                
-                # Mark start of backward pass for logging
-                training_metrics.start_backward()
-                if params.amp_dtype == torch.float16: 
-                    scaler.scale(loss).backward()
-                    # Mark end of backward pass for logging
-                    training_metrics.end_backward()
-                    
-                    # Mark start of optimizer step for logging
-                    training_metrics.start_optimizer()
-                    torch.cuda.nvtx.range_push(f"optimizer")
-                    scaler.step(optimizer)
-                    torch.cuda.nvtx.range_pop() # optimizer
-                    scaler.update()
-                    # Mark end of optimizer step for logging
-                    training_metrics.end_optimizer()
-                else:
-                    loss.backward()
-                    # Mark end of backward pass for logging
-                    training_metrics.end_backward()
-                    
-                    # Mark start of optimizer step for logging
-                    training_metrics.start_optimizer()
-                    torch.cuda.nvtx.range_push(f"optimizer")
-                    optimizer.step()
-                    torch.cuda.nvtx.range_pop() # optimizer
-                    # Mark end of optimizer step for logging
-                    training_metrics.end_optimizer()
+        with torch.inference_mode():
+            with torch.no_grad():
+                for i, data in enumerate(val_data_loader, 0):
+                    with autocast('cuda', enabled=params.amp_enabled, dtype=params.amp_dtype):
+                        inp, tar = map(lambda x: x.to(device), data)
+                        gen = model(inp)
+                        val_loss += loss_func(gen, tar)
+                        val_rmse += weighted_rmse(gen, tar)
+                    valid_steps += 1
 
-                # Mark start of communication for logging
-                training_metrics.start_communication()
                 if params.distributed:
-                    torch.distributed.all_reduce(loss)
-                # Mark end of communication for logging
-                training_metrics.end_communication()
-                    
-                tr_loss.append(loss.item()/world_size)
+                    metrics_logger.on_all_reduce_start()
+                    torch.distributed.all_reduce(val_loss)
+                    val_loss /= world_size
+                    torch.distributed.all_reduce(val_rmse)
+                    val_rmse /= world_size
+                    metrics_logger.on_all_reduce_end()
 
-                torch.cuda.nvtx.range_pop() # step
-                # lr step
-                scheduler.step()
-
-                tr_end = time.time()
-                tr_time += tr_end - tr_start
-                dat_time += tr_start - dat_start
-                step_count += 1
-                
-                # Mark end of iteration for logging
-                training_metrics.end_iteration(loss=loss.item()/world_size)
-
-            torch.cuda.synchronize() # device sync to ensure accurate epoch timings
-            end = time.time()
-
-            if world_rank==0:
-                iters_per_sec = step_count / (end - start)
-                samples_per_sec = params["global_batch_size"] * iters_per_sec
-                logging.info('Time taken for epoch %i is %f sec, avg %f samples/sec',
-                             epoch + 1, end - start, samples_per_sec)
-                logging.info('  Avg train loss=%f'%np.mean(tr_loss))
-                args.tboard_writer.add_scalar('Loss/train', np.mean(tr_loss), iters)
-                args.tboard_writer.add_scalar('Learning Rate', optimizer.param_groups[0]['lr'], iters)
-                args.tboard_writer.add_scalar('Avg iters per sec', iters_per_sec, iters)
-                args.tboard_writer.add_scalar('Avg samples per sec', samples_per_sec, iters)
-                fig = generate_images([inp, tar, gen])
-                args.tboard_writer.add_figure('Visualization, t2m', fig, iters, close=True)
-
-            val_start = time.time()
-            val_loss = torch.zeros(1, device=device)
-            val_rmse = torch.zeros((params.n_out_channels), dtype=torch.float32, device=device)
-            valid_steps = 0
-            model.eval()
-
-            with torch.inference_mode():
-                with torch.no_grad():
-                    for i, data in enumerate(val_data_loader, 0):
-                        with autocast('cuda', enabled=params.amp_enabled, dtype=params.amp_dtype):
-                            inp, tar = map(lambda x: x.to(device), data)
-                            gen = model(inp)
-                            val_loss += loss_func(gen, tar)
-                            val_rmse += weighted_rmse(gen, tar)
-                        valid_steps += 1
-
-                    if params.distributed:
-                        torch.distributed.all_reduce(val_loss)
-                        val_loss /= world_size
-                        torch.distributed.all_reduce(val_rmse)
-                        val_rmse /= world_size
-
-            val_rmse /= valid_steps # Avg validation rmse
-            val_loss /= valid_steps
-            val_end = time.time()
-            if world_rank==0:
-                logging.info('  Avg val loss={}'.format(val_loss.item()))
-                logging.info('  Total validation time: {} sec'.format(val_end - val_start)) 
-                args.tboard_writer.add_scalar('Loss/valid', val_loss, iters)
-                args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], iters)
-                args.tboard_writer.flush()
+        val_rmse /= valid_steps # Avg validation rmse
+        val_loss /= valid_steps
+        val_end = time.time()
+        if world_rank==0:
+            logging.info('  Avg val loss={}'.format(val_loss.item()))
+            logging.info('  Total validation time: {} sec'.format(val_end - val_start)) 
+            args.tboard_writer.add_scalar('Loss/valid', val_loss, iters)
+            args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], iters)
+            args.tboard_writer.flush()
             
-            # End of epoch logging
-            training_metrics.end_epoch(
-                train_loss=np.mean(tr_loss),
-                val_loss=val_loss,
-                val_rmse=val_rmse
+            # Force log metrics at the end of each epoch
+            metrics_logger.log_metrics(
+                iteration=iters,
+                epoch=epoch,
+                loss=val_loss.item(),
+                samples_per_sec=samples_per_sec,
+                lr=optimizer.param_groups[0]['lr'],
+                optimizer=optimizer,
+                global_batch_size=params.global_batch_size,
+                local_batch_size=params.local_batch_size,
+                force=True
             )
 
-        t2 = time.time()
-        tottime = t2 - t1
-        logging.info(f"Rank {world_rank}: Training completed successfully in {tottime:.2f} seconds")
-        
-    except KeyboardInterrupt:
-        logging.info(f"Rank {world_rank}: KeyboardInterrupt received, initiating graceful shutdown...")
-    except Exception as e:
-        logging.error(f"Rank {world_rank}: Exception during training: {str(e)}")
-        import traceback
-        logging.error(traceback.format_exc())
-    finally:
-        logging.info(f"Rank {world_rank}: Entering cleanup phase...")
-        
-        # Generate performance visualizations
-        if world_rank == 0:
-            try:
-                logging.info("Generating performance visualizations...")
-                visualizer = MetricsVisualizer(os.path.join(params.experiment_dir, "logs"), rank=world_rank)
-                visualizer.generate_all_visualizations()
-            except Exception as e:
-                logging.error(f"Error generating visualizations: {str(e)}")
-        
-        # Generate summary report - this will run regardless of how training ended
-        if logger is not None:
-            try:
-                logging.info(f"Rank {world_rank}: Generating summary report...")
-                logger.generate_summary_report()
-            except Exception as e:
-                logging.error(f"Error generating summary report: {str(e)}")
-            
-            try:
-                logger.flush_all()
-                logger.close()
-            except Exception as e:
-                logging.error(f"Error during logger cleanup: {str(e)}")
-        
-        # Clean up other resources
-        try:
-            if args.log_system and system_monitor is not None:
-                system_monitor.stop()
-        except Exception as e:
-            logging.error(f"Error stopping system monitor: {str(e)}")
-        
-        try:
-            if (args.log_gradients or args.log_parameters) and model_metrics is not None:
-                model_metrics.remove_hooks()
-        except Exception as e:
-            logging.error(f"Error removing model hooks: {str(e)}")
-        
-        try:
-            if args.log_communication and params.distributed and restore_torch_distributed_func is not None:
-                restore_torch_distributed_func()
-        except Exception as e:
-            logging.error(f"Error restoring torch.distributed: {str(e)}")
-            
-        logging.info(f"Rank {world_rank}: Cleanup completed")
+    t2 = time.time()
+    tottime = t2 - t1
+    
+    # Finalize metrics logging
+    metrics_logger.finalize()
 
 
 if __name__ == '__main__':
@@ -437,14 +325,9 @@ if __name__ == '__main__':
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
     
-    # Add logging-specific arguments
-    parser.add_argument("--log_frequency", default=100, type=int, help='log metrics every N iterations')
-    parser.add_argument("--detailed_frequency", default=500, type=int, help='log detailed metrics every N iterations')
-    parser.add_argument("--metrics_interval", default=10, type=int, help='system metrics collection interval in seconds')
-    parser.add_argument("--log_gradients", action='store_true', help='log gradient statistics')
-    parser.add_argument("--log_parameters", action='store_true', help='log parameter statistics')
-    parser.add_argument("--log_system", action='store_true', help='log system metrics')
-    parser.add_argument("--log_communication", action='store_true', help='log communication metrics')
+    # Add metrics logging frequency argument
+    parser.add_argument("--metrics_log_freq", default=200, type=int, help='frequency of metrics logging in iterations')
+    parser.add_argument("--save_predictions", action='store_true', help='Save prediction images and metrics during training')
     
     args = parser.parse_args()
  
