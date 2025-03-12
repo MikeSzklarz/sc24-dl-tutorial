@@ -32,8 +32,8 @@ base: &base
   time_means_path:   '../nersc_data/stats/time_means.npy'
   global_means_path: '../nersc_data/stats/global_means.npy'
   global_stds_path:  '../nersc_data/stats/global_stds.npy'
-  limit_nsamples: None
-  limit_nsamples_val: None
+  limit_nsamples: 9490 # using 25% of training data, done for faster testing
+  limit_nsamples_val: 730
 
   # Comms
   wireup_info: env
