@@ -8,7 +8,7 @@
 
 #SBATCH --mem=65GB                     # memory per node
 #SBATCH --partition=waccamaw           # partition name
-#SBATCH --time=03:00:00                # time limit hrs:min:sec
+#SBATCH --time=03:05:00                # time limit hrs:min:sec
 #SBATCH --exclusive                    # exclusive use of node resoureces. Not sure if this works slurm 16.05.9
 
 # Can exclude nodes with "#SBATCH --exclude=waccamaw03, waccamaw04"

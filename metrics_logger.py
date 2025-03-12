@@ -15,22 +15,30 @@ except ImportError:
     PYNVML_AVAILABLE = False
 
 class MetricsLogger:
-    """Metrics logger with support for multi-node collection"""
+    """Metrics logger with support for multi-node collection and time-based logging"""
     
-    def __init__(self, log_dir, metrics_log_freq, world_size, world_rank):
+    def __init__(self, log_dir, metrics_log_freq=None, log_interval_minutes=None, 
+                 world_size=1, world_rank=0):
         """Initialize the metrics logger
         
         Args:
             log_dir: Directory to save CSV files
-            metrics_log_freq: How often to log metrics (in iterations)
+            metrics_log_freq: Legacy frequency in iterations (kept for backward compatibility)
+            log_interval_minutes: Frequency of logging in minutes (for time-based logging)
             world_size: Total number of processes
             world_rank: Current process rank
         """
         self.log_dir = log_dir
-        self.metrics_log_freq = metrics_log_freq
+        self.metrics_log_freq = metrics_log_freq if metrics_log_freq is not None else 100
+        self.log_interval_seconds = log_interval_minutes * 60 if log_interval_minutes is not None else None
+        self.use_time_based = log_interval_minutes is not None
         self.world_size = world_size
         self.world_rank = world_rank
         self.is_main_process = (world_rank == 0)
+        
+        # For time-based logging, track the last log time
+        self.last_log_time = time.time()
+        self.metrics_logged_count = 0
         
         # Initialize NVML for GPU metrics on all nodes
         self.nvml_initialized = False
@@ -119,7 +127,12 @@ class MetricsLogger:
                     "ssim", "rmse", "rmse_normalized"
                 ])
             
-            logging.info(f"Metrics Logger initialized. Logging every {metrics_log_freq} iterations to {log_dir}")
+            # Log initialization message with appropriate frequency information
+            if self.use_time_based:
+                logging.info(f"Metrics Logger initialized. Logging every {log_interval_minutes:.1f} minutes to {log_dir}")
+            else:
+                logging.info(f"Metrics Logger initialized. Logging every {metrics_log_freq} iterations to {log_dir}")
+                
             logging.info(f"Predictions saved to: {self.predictions_dir}")
             logging.info(f"  - Images: {self.images_dir}")
             logging.info(f"  - Raw data: {self.data_dir}")
@@ -143,9 +156,30 @@ class MetricsLogger:
         self.optimizer_time = 0
         self.all_reduce_time = 0
     
-    def should_log(self, iteration):
-        """Check if we should log metrics for this iteration"""
-        return iteration % self.metrics_log_freq == 0
+    def should_log(self, iteration, force=False):
+        """Check if we should log metrics at this point
+        
+        Args:
+            iteration: Current iteration number (used for iteration-based logging)
+            force: Whether to force logging regardless of timing/frequency
+        
+        Returns:
+            bool: Whether to log metrics
+        """
+        if not self.is_main_process:
+            return False
+            
+        if force:
+            return True
+            
+        if self.use_time_based and self.log_interval_seconds is not None:
+            # Time-based logging
+            current_time = time.time()
+            elapsed = current_time - self.last_log_time
+            return elapsed >= self.log_interval_seconds
+        else:
+            # Iteration-based logging (legacy)
+            return iteration % self.metrics_log_freq == 0
     
     def on_batch_start(self):
         """Record the start of a batch"""
@@ -354,8 +388,13 @@ class MetricsLogger:
         Returns:
             img_metrics: Dictionary of image metrics if image_fields was provided (main process only), else None
         """
-        if not (self.should_log(iteration) or force):
+        if not self.should_log(iteration, force):
             return None
+        
+        # Update the last log time for time-based logging
+        if self.use_time_based:
+            self.last_log_time = time.time()
+            self.metrics_logged_count += 1
         
         # Get performance metrics from this node
         metrics = self.get_performance_metrics(
@@ -532,7 +571,12 @@ class MetricsLogger:
         # Reset timers for next iteration
         self.reset_timers()
         
-        logging.info(f"Metrics Logged Iteration: {iteration}")
+        # Log message with appropriate information
+        if self.is_main_process:
+            if self.use_time_based:
+                logging.info(f"Metrics Logged Iteration: {iteration} (#{self.metrics_logged_count})")
+            else:
+                logging.info(f"Metrics Logged Iteration: {iteration}")
         
         return img_metrics if self.is_main_process else None
     
@@ -623,6 +667,11 @@ class MetricsLogger:
                 pynvml.nvmlShutdown()
             except:
                 pass
+        
+        # Log summary information
+        if self.is_main_process:
+            if self.use_time_based:
+                logging.info(f"Metrics logging complete. Total logging points: {self.metrics_logged_count}")
 
     def log_image_metrics(self, fields, iteration, epoch, force=False):
         """
@@ -637,7 +686,7 @@ class MetricsLogger:
         Returns:
             metrics: Dictionary of calculated metrics
         """
-        if not (self.should_log(iteration) or force) or not self.is_main_process:
+        if not (self.should_log(iteration, force)) or not self.is_main_process:
             return None
         
         inp, tar, gen = [x.detach().float().cpu().numpy() for x in fields]
@@ -719,7 +768,7 @@ class MetricsLogger:
         Returns:
             fig: Matplotlib figure object
         """
-        if not (self.should_log(iteration) or force) or not self.is_main_process:
+        if not (self.should_log(iteration, force)) or not self.is_main_process:
             return None
         
         inp, tar, gen = [x.detach().float().cpu().numpy() for x in fields]

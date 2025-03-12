@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Reset the logs directory for a clean start
-ehco "Resetting logs directory"
+echo "Resetting logs directory"
 echo "Removed logs"
 rm -r logs 
 

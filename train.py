@@ -67,10 +67,14 @@ def train(params, args, local_rank, world_rank, world_size):
     # Initialize the metrics logger
     metrics_logger = MetricsLogger(
         log_dir=params.experiment_dir,
-        metrics_log_freq=args.metrics_log_freq,
+        log_interval_minutes=args.log_interval_minutes,
         world_size=world_size,
         world_rank=world_rank
     )
+    
+    last_log_time = time.time()
+    log_interval_seconds = args.log_interval_minutes * 60  # Convert minutes to seconds
+    metrics_logged_count = 0
         
     iters = 0
     startEpoch = 0
@@ -120,7 +124,19 @@ def train(params, args, local_rank, world_rank, world_size):
         logging.info(f"Total training batches: {len(train_data_loader)}")
         logging.info(f"Total validation batches: {len(val_data_loader)}")
         logging.info("---------------------------------------------------")
-        
+    
+    # Add before main training loop
+    if world_rank == 0:
+        logging.info("Running warmup iterations...")
+    for warmup_iter in range(10):
+        with torch.no_grad():  # Optional, depends on your needs
+            inp, tar = map(lambda x: x.to(device), next(iter(train_data_loader)))
+            gen = model(inp)
+    torch.cuda.synchronize()
+    if world_rank == 0:
+        logging.info("Warmup complete")
+        logging.info("---------------------------------------------------")
+    
     iters = 0
     t1 = time.time()
     for epoch in range(startEpoch, startEpoch + params.num_epochs):
@@ -219,23 +235,34 @@ def train(params, args, local_rank, world_rank, world_size):
             batch_time = tr_end - dat_start
             samples_per_sec = params.global_batch_size / batch_time
             
-            # Log metrics
-            metrics = metrics_logger.log_metrics(
-                iteration=iters,
-                epoch=epoch,
-                loss=np.mean(tr_loss),
-                samples_per_sec=samples_per_sec,
-                lr=optimizer.param_groups[0]['lr'],
-                optimizer=optimizer,
-                global_batch_size=params.global_batch_size,
-                local_batch_size=params.local_batch_size,
-                image_fields=[inp, tar, gen] if args.save_predictions else None,
-            )
-            
-            # Log image metrics to TensorBoard if available
-            if metrics and world_rank == 0:
-                args.tboard_writer.add_scalar('Training/SSIM', metrics['ssim'], iters)
-                args.tboard_writer.add_scalar('Training/RMSE', metrics['rmse'], iters)
+            current_time = time.time()
+            elapsed_since_last_log = current_time - last_log_time
+            should_log = elapsed_since_last_log >= log_interval_seconds
+
+            if should_log:
+                # Log metrics
+                metrics = metrics_logger.log_metrics(
+                    iteration=iters,
+                    epoch=epoch,
+                    loss=np.mean(tr_loss),
+                    samples_per_sec=samples_per_sec,
+                    lr=optimizer.param_groups[0]['lr'],
+                    optimizer=optimizer,
+                    global_batch_size=params.global_batch_size,
+                    local_batch_size=params.local_batch_size,
+                    image_fields=[inp, tar, gen] if args.save_predictions else None,
+                    force=True
+                )
+                
+                # Update last log time
+                last_log_time = current_time
+                metrics_logged_count += 1
+                
+                # Log image metrics to TensorBoard if available
+                if metrics and world_rank == 0:
+                    args.tboard_writer.add_scalar('Training/SSIM', metrics['ssim'], iters)
+                    args.tboard_writer.add_scalar('Training/RMSE', metrics['rmse'], iters)
+                    
 
         torch.cuda.synchronize() # device sync to ensure accurate epoch timings
         end = time.time()
@@ -288,19 +315,6 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_scalar('Loss/valid', val_loss, iters)
             args.tboard_writer.add_scalar('RMSE(u10m)/valid', val_rmse.cpu().numpy()[0], iters)
             args.tboard_writer.flush()
-            
-            # Force log metrics at the end of each epoch
-            metrics_logger.log_metrics(
-                iteration=iters,
-                epoch=epoch,
-                loss=val_loss.item(),
-                samples_per_sec=samples_per_sec,
-                lr=optimizer.param_groups[0]['lr'],
-                optimizer=optimizer,
-                global_batch_size=params.global_batch_size,
-                local_batch_size=params.local_batch_size,
-                force=True
-            )
 
     t2 = time.time()
     tottime = t2 - t1
@@ -325,8 +339,8 @@ if __name__ == '__main__':
     parser.add_argument("--disable_broadcast_buffers", action='store_true', help='disable syncing broadcasting buffers')
     parser.add_argument("--noddp", action='store_true', help='disable DDP communication')
     
-    # Add metrics logging frequency argument
-    parser.add_argument("--metrics_log_freq", default=200, type=int, help='frequency of metrics logging in iterations')
+    
+    parser.add_argument("--log_interval_minutes", type=float, default=5.0, help="Log metrics every N minutes")
     parser.add_argument("--save_predictions", action='store_true', help='Save prediction images and metrics during training')
     
     args = parser.parse_args()
