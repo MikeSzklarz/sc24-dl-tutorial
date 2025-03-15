@@ -18,7 +18,7 @@ base: &base
   expdir: './logs'
   lr_schedule: 'cosine'
   lr: 5E-4
-  warmup: 0
+  warmup: 100
   optimizer: 'Adam'
 
   # Data
@@ -32,8 +32,6 @@ base: &base
   time_means_path:   '../nersc_data/stats/time_means.npy'
   global_means_path: '../nersc_data/stats/global_means.npy'
   global_stds_path:  '../nersc_data/stats/global_stds.npy'
-  limit_nsamples: 9490 # using 25% of training data, done for faster testing
-  limit_nsamples_val: 730
 
   # Comms
   wireup_info: env
@@ -170,3 +168,186 @@ mp_bs32:
 mp_patch4:
   <<: *mp
   patch_size: 4
+
+# new configs to test on smaller cluster/gpu
+# --- Batch Size 4 Configurations ---
+test_logging_bs4:
+  <<: *opt
+  limit_nsamples: 150
+  limit_nsamples_val: 50
+  global_batch_size: 4
+  log_frequency: 10
+  lr: 2.5E-4
+
+test_small_bs4:
+  <<: *opt
+  limit_nsamples: 1000
+  limit_nsamples_val: 100
+  global_batch_size: 4
+  lr: 2.5E-4
+
+test_medium_bs4:
+  <<: *opt
+  limit_nsamples: 3000
+  limit_nsamples_val: 250
+  global_batch_size: 4
+  lr: 2.5E-4
+
+test_large_bs4:
+  <<: *opt
+  limit_nsamples: 7500
+  limit_nsamples_val: 625
+  global_batch_size: 4
+  lr: 2.5E-4
+
+full_bs4:
+  <<: *opt
+  limit_nsamples: None
+  limit_nsamples_val: None
+  global_batch_size: 4
+  lr: 2.5E-4
+
+# --- Batch Size 8 Configurations ---
+test_logging_bs8:
+  <<: *opt
+  limit_nsamples: 150
+  limit_nsamples_val: 50
+  global_batch_size: 8
+  lr: 5E-4
+
+test_small_bs8:
+  <<: *opt
+  limit_nsamples: 1000
+  limit_nsamples_val: 100
+  global_batch_size: 8
+  lr: 5E-4
+
+test_medium_bs8:
+  <<: *opt
+  limit_nsamples: 3000
+  limit_nsamples_val: 250
+  global_batch_size: 8
+  lr: 5E-4
+
+test_large_bs8:
+  <<: *opt
+  limit_nsamples: 7500
+  limit_nsamples_val: 625
+  global_batch_size: 8
+  lr: 5E-4
+
+full_bs8:
+  <<: *opt
+  limit_nsamples: None
+  limit_nsamples_val: None
+  global_batch_size: 8
+  lr: 5E-4
+
+# --- Batch Size 16 Configurations ---
+test_logging_bs16:
+  <<: *opt
+  limit_nsamples: 150
+  limit_nsamples_val: 50
+  global_batch_size: 16
+  lr: 5E-4
+
+test_small_bs16:
+  <<: *opt
+  limit_nsamples: 1000
+  limit_nsamples_val: 100
+  global_batch_size: 16
+  lr: 5E-4
+
+test_medium_bs16:
+  <<: *opt
+  limit_nsamples: 3000
+  limit_nsamples_val: 250
+  global_batch_size: 16
+  lr: 7.07E-4
+
+test_large_bs16:
+  <<: *opt
+  limit_nsamples: 7500
+  limit_nsamples_val: 625
+  global_batch_size: 16
+  lr: 7.07E-4
+
+full_bs16:
+  <<: *opt
+  limit_nsamples: None
+  limit_nsamples_val: None
+  global_batch_size: 16
+  lr: 7.07E-4
+
+# --- Batch Size 32 Configurations ---
+test_logging_bs32:
+  <<: *opt
+  limit_nsamples: 150
+  limit_nsamples_val: 50
+  global_batch_size: 32
+  lr: 7.07E-4
+
+test_small_bs32:
+  <<: *opt
+  limit_nsamples: 1000
+  limit_nsamples_val: 100
+  global_batch_size: 32
+  lr: 7.07E-4
+
+test_medium_bs32:
+  <<: *opt
+  limit_nsamples: 3000
+  limit_nsamples_val: 250
+  global_batch_size: 32
+  lr: 7.07E-4
+
+test_large_bs32:
+  <<: *opt
+  limit_nsamples: 7500
+  limit_nsamples_val: 625
+  global_batch_size: 32
+  lr: 7.07E-4
+
+full_bs32:
+  <<: *opt
+  limit_nsamples: None
+  limit_nsamples_val: None
+  global_batch_size: 32
+  lr: 7.07E-4
+
+# --- Batch Size 64 Configurations ---
+test_logging_bs64:
+  <<: *opt
+  limit_nsamples: 150
+  limit_nsamples_val: 50
+  global_batch_size: 64
+  log_frequency: 10
+  lr: 1E-3
+
+test_small_bs64:
+  <<: *opt
+  limit_nsamples: 1000
+  limit_nsamples_val: 100
+  global_batch_size: 64
+  lr: 1E-3
+
+test_medium_bs64:
+  <<: *opt
+  limit_nsamples: 3000
+  limit_nsamples_val: 250
+  global_batch_size: 64
+  lr: 1E-3
+
+test_large_bs64:
+  <<: *opt
+  limit_nsamples: 7500
+  limit_nsamples_val: 625
+  global_batch_size: 64
+  lr: 1E-3
+
+full_bs64:
+  <<: *opt
+  limit_nsamples: None
+  limit_nsamples_val: None
+  global_batch_size: 64
+  lr: 1E-3
