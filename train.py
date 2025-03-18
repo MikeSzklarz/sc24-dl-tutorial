@@ -241,6 +241,11 @@ def train(params, args, local_rank, world_rank, world_size):
         "total_samples_processed": 0
     }
     
+    steps_per_epoch = len(train_data_loader)
+    if world_rank == 0:
+        logging.info(f"Steps per epoch: {steps_per_epoch}")
+        logging.info(f"Total steps: {steps_per_epoch * params.num_epochs}")
+    
     for epoch in range(startEpoch, startEpoch + params.num_epochs):
         epoch_start = time.time()
         torch.cuda.synchronize()  # device sync to ensure accurate epoch timings
@@ -444,13 +449,10 @@ def train(params, args, local_rank, world_rank, world_size):
             args.tboard_writer.add_figure('Visualization, t2m', fig, iters, close=True)
             
             # Log scaling efficiency (if world_size > 1)
-            if world_size > 1:
-                # This is an approximation assuming linear scaling with GPUs
-                # In a real implementation, you'd have baseline single-GPU numbers to compare
-                theoretical_max_samples_per_sec = samples_per_sec / world_size * world_size  # Ideal linear scaling
-                scaling_efficiency = (samples_per_sec / theoretical_max_samples_per_sec) * 100
-                args.tboard_writer.add_scalar('Scaling/efficiency_percent', scaling_efficiency, epoch)
-                args.tboard_writer.add_scalar('Scaling/samples_per_gpu', samples_per_sec / world_size, epoch)
+            if world_size > 1 and world_rank == 0:
+                samples_per_gpu = samples_per_sec / world_size
+                args.tboard_writer.add_scalar('Performance/samples_per_gpu', samples_per_gpu, epoch)
+                logging.info(f"Samples per GPU: {samples_per_gpu:.2f}")
 
         # Validation
         val_start = time.time()
@@ -499,7 +501,7 @@ def train(params, args, local_rank, world_rank, world_size):
     total_training_end = time.time()
     total_time = total_training_end - total_training_start
     total_samples = cumulative_metrics["total_samples_processed"]
-    total_steps = sum(min(params.steps_per_epoch, len(train_data_loader)) for _ in range(params.num_epochs))
+    total_steps = len(train_data_loader) * params.num_epochs
     
     if total_time > 0:
         overall_iters_per_sec = total_steps / total_time
